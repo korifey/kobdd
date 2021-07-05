@@ -16,25 +16,38 @@ import kotlin.math.absoluteValue
 import kotlin.system.measureNanoTime
 
 class Kobdd private constructor(val node: Int) {
-    override fun equals(other: Any?): Boolean {
-        return other is Kobdd && node == other.node
-    }
 
-    override fun hashCode(): Int {
-        return node
-    }
-
-    override fun toString(): String {
-        return "Kobdd($node)"
-    }
+    //overriding methods
+    override fun equals(other: Any?): Boolean = other is Kobdd && node == other.node
+    override fun hashCode(): Int = node
+    override fun toString(): String = if (node == ONE_NODE) "KOBDD(TRUE)" else if (node == ZERO_NODE) "KOBDD(FALSE)" else  "KOBDD(node=$node, var=${variable(node)})"
 
     companion object {
-        //fast hashtable implementation without reference types
+        /**
+         * Fast hashtable implementation without reference types. [TERM_MARKER] is like <null> for classic linked lists.
+         */
         private const val TERM_MARKER = -1
 
-        private var capacity = 1 shl 2 //will use only powers of 2 as size
+        /**
+         * Length of [buckets] array and number of nodes in [storage] array. Each node is 4 ints, so [storage].size = [capacity]*4
+         * Use only powers of 2 for capacity because ([capacity]-1) gives us handful bitmap for hashcode() to bucketNumber mapping
+         */
+        private var capacity = 1 shl 10 //will use only powers of 2 as size
+
+        /**
+         * Number of nodes in storage. Invariant: [size] <= [capacity]
+         */
         private var size: Int = 0
+
+        /**
+         * The same as buckets in classic hashtable but stores index of node in [storage] instead of pointer
+         */
         private var buckets = IntArray(capacity) { TERM_MARKER }
+
+        /**
+         * Storage for all BDSs nodes.  Each node is 4 32bit ints [variable | oneBranchIndex | zeroBranchIndex | nextNodeInBucketIndex]
+         * So [storage].size = [capacity]*4
+         */
         private var storage = IntArray(capacity  shl 2)
 
         internal fun variable(index: Int) : Int = storage[index shl 2]
@@ -284,47 +297,50 @@ operator fun Kobdd.times(other: Kobdd) = this.and(other)
 fun processCnfRequest(vars: Int, clauses: Array<MutableList<Int>>) : List<Int>?{
 
 //1. stupid strategy without using `exists()`, stop working at http://user.it.uu.se/~tjawe125/software/pigeonhole/pigeon-12.cnf
-//    var resBdd = TRUE
-//    for (c in clauses) {
-//        resBdd *= clause(ClauseKind.Disjunction, c)
-//        println("v processed clause $c")
-//    }
-//    return resBdd.model()
-
-
-    //2. random var strategy
-    var bdd = TRUE
-
-    val unusedClauses = clauses.toMutableSet()
-    val variables = mutableSetOf<Int>()
-    while (unusedClauses.isNotEmpty()) {
-        //take some clause
-        val clause = unusedClauses.iterator().next()
-        unusedClauses.remove(clause)
-
-        variables.addAll(clause.map { it.absoluteValue })
-        bdd *= clause(ClauseKind.Disjunction, clause)
-
-        while (variables.isNotEmpty()) {
-            val v = variables.iterator().next()
-
-            for (cc in unusedClauses.filter { it.contains(v) || it.contains(-v) }) {
-                println("v processed clause $cc: (${clauses.size - unusedClauses.size} of ${clauses.size})")
-                unusedClauses.remove(cc)
-                bdd *= clause(ClauseKind.Disjunction, cc)
-                variables.addAll(cc.map { it.absoluteValue })
-            }
-            bdd = bdd.exists(v)
-            variables.remove(v)
-            if (bdd == FALSE) return null //shortcut
-        }
+    var resBdd = TRUE
+    for (c in clauses) {
+        resBdd *= clause(ClauseKind.Disjunction, c)
+        println("v processed clause $c")
     }
+    return resBdd.model()
 
-    return if (bdd == FALSE) null
-    else listOf() //TODO no actual model, just SAT in this case
+
+//    2. random var strategy
+//    var bdd = TRUE
+//
+//    val unusedClauses = clauses.toMutableSet()
+//    val variables = mutableSetOf<Int>()
+//    while (unusedClauses.isNotEmpty()) {
+//        //take some clause
+//        val clause = unusedClauses.iterator().next()
+//        unusedClauses.remove(clause)
+//
+//        variables.addAll(clause.map { it.absoluteValue })
+//        bdd *= clause(ClauseKind.Disjunction, clause)
+//
+//        while (variables.isNotEmpty()) {
+//            val v = variables.iterator().next()
+//
+//            for (cc in unusedClauses.filter { it.contains(v) || it.contains(-v) }) {
+//                println("v processed clause $cc: (${clauses.size - unusedClauses.size} of ${clauses.size})")
+//                unusedClauses.remove(cc)
+//                bdd *= clause(ClauseKind.Disjunction, cc)
+//                variables.addAll(cc.map { it.absoluteValue })
+//            }
+//            bdd = bdd.exists(v)
+//            variables.remove(v)
+//            if (bdd == FALSE) return null //shortcut
+//        }
+//    }
+//
+//    return if (bdd == FALSE) null
+//    else listOf() //TODO no actual model, just SAT in this case
 }
 
 fun main() {
+    println("v KOBDD SAT SOLVER, v0.1")
+    println("v Solves formulas in CNF form as specified in http://www.satcompetition.org/2004/format-solvers2004.html")
+
     val reader = BufferedReader(InputStreamReader(System.`in`))
     val scanner = Scanner(reader)
 
