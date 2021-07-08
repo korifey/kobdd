@@ -6,6 +6,7 @@ import org.kobdd.Kobdd.Companion.TRUE
 import org.kobdd.Kobdd.Companion.ZERO_NODE
 import org.kobdd.Kobdd.Companion.mkNode
 import org.kobdd.Kobdd.Companion.one
+import org.kobdd.Kobdd.Companion.opcache
 import org.kobdd.Kobdd.Companion.variable
 import org.kobdd.Kobdd.Companion.zero
 import java.io.BufferedReader
@@ -53,7 +54,7 @@ class Kobdd private constructor(val node: Int) {
         internal fun variable(index: Int) : Int = storage[index shl 2]
         internal fun one(index: Int) : Int = storage[(index shl 2) + 1]
         internal fun zero(index: Int) : Int = storage[(index shl 2) + 2]
-        private fun addNode(variable: Int, one: Int, zero: Int): Int {
+        private fun insertNode(variable: Int, one: Int, zero: Int): Int {
             val index = size ++
             storage[index shl 2] = variable
             storage[(index shl 2)+1] = one
@@ -74,17 +75,19 @@ class Kobdd private constructor(val node: Int) {
         const val ZERO_NODE = -3
 
         private fun hash(variable: Int, one: Int, zero: Int) : Int {
-            //not sure whether it's good hash code for 3 integers
+            //TODO not sure whether it's good hash code for 3 integers
             return variable * 31 * 31 + one * 31 + zero
         }
 
-        private const val MAX_CAPACICTY = 1 shl 26
+        const val MAX_CAPACITY_BITS = 26
+        const val MAX_CAPACITY = 1 shl MAX_CAPACITY_BITS
+
         private fun ensureCapacity() {
             assert(size <= capacity)
             if (size < capacity) return
 
             //TODO Need to implement Garbage collection based on WeakReferences and [ref] at this codepoint
-            require(capacity < MAX_CAPACICTY) {"Maximum capacity $MAX_CAPACICTY is reached, can't use more memory"}
+            require(capacity < MAX_CAPACITY) {"Maximum capacity $MAX_CAPACITY is reached, can't use more memory"}
             capacity = capacity shl 1
             val bitmask = capacity - 1
 
@@ -115,14 +118,14 @@ class Kobdd private constructor(val node: Int) {
             val bucketIndex = hash(variable, one, zero) and bitmask
             var storageIndex = buckets[bucketIndex]
             if (storageIndex == TERM_MARKER) {
-                return addNode(variable, one, zero).also { buckets[bucketIndex] = it }
+                return insertNode(variable, one, zero).also { buckets[bucketIndex] = it }
             }
             while (true) {
                 if (variable(storageIndex) == variable && one(storageIndex) == one && zero(storageIndex) == zero)
                     return storageIndex //already existing node
 
                 if (next(storageIndex) == TERM_MARKER) {
-                    return addNode(variable, one, zero).also { setNext(storageIndex, it) }
+                    return insertNode(variable, one, zero).also { setNext(storageIndex, it) }
                 } else {
                     storageIndex = next(storageIndex)
                 }
@@ -135,10 +138,15 @@ class Kobdd private constructor(val node: Int) {
         val TRUE : Kobdd get() = Kobdd(ONE_NODE)
         val FALSE : Kobdd get() = Kobdd(ZERO_NODE)
 
+
+        internal val opcache = Opcache()
+
         internal operator fun invoke(node: Int) =
-                if (node == ONE_NODE) TRUE
-                else if (node == ZERO_NODE) FALSE
-                else Kobdd(node)
+                when (node) {
+                    ONE_NODE -> TRUE
+                    ZERO_NODE -> FALSE
+                    else -> Kobdd(node)
+                }
     }
 
     init {
@@ -201,26 +209,34 @@ fun clause(clauseKind: ClauseKind, literals: List<Int>) : Kobdd {
 }
 
 fun conj(vararg literals: Int) = clause(ClauseKind.Conjunction, literals.toList())
+
+/**
+ * Creates disjunction of literals.
+ */
 fun disj(vararg literals: Int) = clause(ClauseKind.Disjunction, literals.toList())
 
-private fun mkNeg(node: Int) : Int {
+private fun mkNegate(node: Int) : Int {
     if (node == ONE_NODE) return ZERO_NODE
     if (node == ZERO_NODE) return ONE_NODE
 
 
-    return mkNode(variable(node), mkNeg(one(node)), mkNeg(zero(node)))
+    return mkNode(variable(node), mkNegate(one(node)), mkNegate(zero(node)))
 }
-fun Kobdd.neg() : Kobdd = Kobdd(mkNeg(node))
+
+/**
+ * Negates formula represented by [this] BDD.
+ */
+fun Kobdd.negate() : Kobdd = Kobdd(mkNegate(node))
 
 //TODO use cache instead hashtable
-val andCache = hashMapOf<Pair<Int, Int>, Int>()
+//val andCache = hashMapOf<Pair<Int, Int>, Int>()
 private fun mkAnd(left: Int, right: Int) : Int {
     if (left == right) return left
     if (left == ZERO_NODE || right == ZERO_NODE) return ZERO_NODE
     if (left == ONE_NODE) return right
     if (right == ONE_NODE) return left
 
-    return andCache.getOrPut(left to right) {
+    return opcache.binop(BinopKind.And, left, right) {
         when {
             variable(left) < variable(right) -> mkNode(variable(left), mkAnd(one(left), right), mkAnd(zero(left), right))
             variable(left) > variable(right) -> mkNode(variable(right), mkAnd(one(right), left), mkAnd(zero(right), left))
@@ -230,14 +246,14 @@ private fun mkAnd(left: Int, right: Int) : Int {
 }
 
 //TODO use cache instead hashtable
-val orCache = hashMapOf<Pair<Int, Int>, Int>()
+//val orCache = hashMapOf<Pair<Int, Int>, Int>()
 private fun mkOr(left: Int, right: Int) : Int {
     if (left == right) return left
     if (left == ONE_NODE || right == ONE_NODE) return ONE_NODE
     if (left == ZERO_NODE) return right
     if (right == ZERO_NODE) return left
 
-    return orCache.getOrPut(left to right) {
+    return opcache.binop(BinopKind.Or, left, right) {
       when {
           variable(left) < variable(right) -> mkNode(variable(left), mkOr(one(left), right), mkOr(zero(left), right))
           variable(left) > variable(right) -> mkNode(variable(right), mkOr(one(right), left), mkOr(zero(right), left))
@@ -246,8 +262,14 @@ private fun mkOr(left: Int, right: Int) : Int {
     }
 }
 
-
+/**
+ * Conjunction of formulas: [this] & [other]
+ */
 fun Kobdd.and(other: Kobdd) : Kobdd = Kobdd(mkAnd(this.node, other.node))
+
+/**
+ * Disjunction of formulas: [this] | [other]
+ */
 fun Kobdd.or(other: Kobdd) : Kobdd = Kobdd(mkOr(this.node, other.node))
 
 
@@ -262,6 +284,8 @@ fun mkExists(node: Int, variable: Int) : Int {
 }
 
 fun Kobdd.exists(variable: Int) : Kobdd {
+    require(variable > 0) { "Variable must be greater that 0, but it's $variable" }
+
     existsCache.clear()
     return Kobdd(mkExists(node, variable))
 }
@@ -289,7 +313,7 @@ fun Kobdd.model() : List<Int>? {
     return res
 }
 
-operator fun Kobdd.unaryMinus() = neg()
+operator fun Kobdd.unaryMinus() = negate()
 operator fun Kobdd.plus(other: Kobdd) = this.or(other)
 operator fun Kobdd.times(other: Kobdd) = this.and(other)
 
