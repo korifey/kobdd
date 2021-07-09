@@ -38,7 +38,7 @@ class Kobdd private constructor(val node: Int) {
         /**
          * Number of nodes in storage. Invariant: [size] <= [capacity]
          */
-        private var size: Int = 0
+        internal var size: Int = 0
 
         /**
          * The same as buckets in classic hashtable but stores index of node in [storage] instead of pointer
@@ -56,6 +56,8 @@ class Kobdd private constructor(val node: Int) {
         internal fun zero(index: Int) : Int = storage[(index shl 2) + 2]
         private fun insertNode(variable: Int, one: Int, zero: Int): Int {
             val index = size ++
+//            if (index % 1_000_000 == 0)
+//                println("Nodes created: $index")
             storage[index shl 2] = variable
             storage[(index shl 2)+1] = one
             storage[(index shl 2)+2] = zero
@@ -103,6 +105,13 @@ class Kobdd private constructor(val node: Int) {
 
         }
 
+        //Dangerous, all BDD becomes invalid
+        fun reset() {
+            opcache.clear()
+            buckets.fill(TERM_MARKER)
+            size = 0
+        }
+
         //index of node, or -1
         internal fun mkNode(variable: Int, one: Int, zero: Int): Int {
             assert(variable > 0)
@@ -147,6 +156,8 @@ class Kobdd private constructor(val node: Int) {
                     ZERO_NODE -> FALSE
                     else -> Kobdd(node)
                 }
+
+
     }
 
     init {
@@ -208,6 +219,28 @@ fun clause(clauseKind: ClauseKind, literals: List<Int>) : Kobdd {
     return Kobdd(currentNode)
 }
 
+
+fun mkSubst(node: Int, literal: Int) : Int {
+    val v = literal.absoluteValue
+    return when {
+        v < variable(node) -> node
+        v == variable(node) -> if (literal > 0) one(node) else zero(node)
+        else /* v > variable(node) */ -> mkNode(variable(node), mkSubst(one(node), literal), mkSubst(zero(node), literal))
+    }
+}
+/**
+ * Substitution of variable's value info formula represented by BDD. F[abs([literal])=sign([literal])]
+ */
+fun Kobdd.substitute(literal: Int): Kobdd {
+    require(literal != 0) {"0 is not allowed for literal"}
+    require(literal != Int.MIN_VALUE) {"Int.MIN_VALUE is not allowed for literal"}
+
+    return Kobdd(mkSubst(node, literal))
+}
+
+/**
+ * Creates conjunction of literals
+ */
 fun conj(vararg literals: Int) = clause(ClauseKind.Conjunction, literals.toList())
 
 /**
@@ -313,105 +346,30 @@ fun Kobdd.model() : List<Int>? {
     return res
 }
 
+internal fun Kobdd.populateModel(model: IntArray) {
+    var curNode = node
+    while (curNode != ONE_NODE) {
+        assert (curNode != ZERO_NODE)
+
+        val m = model[variable(curNode)]
+        if (m > 0) {
+            assert(m == 1)
+            curNode = one(curNode)
+        } else if (m < 0) {
+            assert(m == -1)
+            curNode = zero(curNode)
+        } else /* v == 0 */ {
+            if (one(curNode) != ZERO_NODE) {
+                model[variable(curNode)] = 1
+                curNode = one(curNode)
+            } else {
+                model[variable(curNode)] = -1
+                curNode = zero(curNode)
+            }
+        }
+    }
+}
+
 operator fun Kobdd.unaryMinus() = negate()
 operator fun Kobdd.plus(other: Kobdd) = this.or(other)
 operator fun Kobdd.times(other: Kobdd) = this.and(other)
-
-
-fun processCnfRequest(vars: Int, clauses: Array<MutableList<Int>>) : List<Int>?{
-
-//1. stupid strategy without using `exists()`, stop working at http://user.it.uu.se/~tjawe125/software/pigeonhole/pigeon-12.cnf
-    var resBdd = TRUE
-    for (c in clauses) {
-        resBdd *= clause(ClauseKind.Disjunction, c)
-        println("v processed clause $c")
-    }
-    return resBdd.model()
-
-
-//    2. random var strategy
-//    var bdd = TRUE
-//
-//    val unusedClauses = clauses.toMutableSet()
-//    val variables = mutableSetOf<Int>()
-//    while (unusedClauses.isNotEmpty()) {
-//        //take some clause
-//        val clause = unusedClauses.iterator().next()
-//        unusedClauses.remove(clause)
-//
-//        variables.addAll(clause.map { it.absoluteValue })
-//        bdd *= clause(ClauseKind.Disjunction, clause)
-//
-//        while (variables.isNotEmpty()) {
-//            val v = variables.iterator().next()
-//
-//            for (cc in unusedClauses.filter { it.contains(v) || it.contains(-v) }) {
-//                println("v processed clause $cc: (${clauses.size - unusedClauses.size} of ${clauses.size})")
-//                unusedClauses.remove(cc)
-//                bdd *= clause(ClauseKind.Disjunction, cc)
-//                variables.addAll(cc.map { it.absoluteValue })
-//            }
-//            bdd = bdd.exists(v)
-//            variables.remove(v)
-//            if (bdd == FALSE) return null //shortcut
-//        }
-//    }
-//
-//    return if (bdd == FALSE) null
-//    else listOf() //TODO no actual model, just SAT in this case
-}
-
-fun main() {
-    println("v KOBDD SAT SOLVER, v0.1")
-    println("v Solves formulas in CNF form as specified in http://www.satcompetition.org/2004/format-solvers2004.html")
-
-    val reader = BufferedReader(InputStreamReader(System.`in`))
-    val scanner = Scanner(reader)
-
-    while (scanner.hasNext()) {
-        val token = scanner.next()
-
-        if (token == "c") {
-            scanner.nextLine()
-            continue
-        } //skip comment
-
-        if (token != "p")
-            error ("Illegal token $token. Only 'c' and 'p' command are supported")
-
-        val cnf = scanner.next()
-        if (cnf != "cnf")
-            error ("Illegal request $cnf. Only 'cnf' supported")
-
-        val vars = scanner.nextInt() //don't need this variable
-        val clauses = Array(scanner.nextInt()) { mutableListOf<Int>()}
-        for (i in clauses.indices) {
-            while (true) {
-                val nxt = scanner.nextInt()
-
-                if (nxt == 0) break
-                else clauses[i].add(nxt)
-            }
-        }
-
-        val model: List<Int>?
-        println("v Start processing CNF request with $vars variables and ${clauses.size} clauses")
-        val time = measureNanoTime {
-            model = processCnfRequest(vars, clauses)
-        }
-        println("v Request processed in %.3f sec".format(time / 1_000_000_000.0))
-
-        if (model == null) {
-            println("s UNSATISFIABLE")
-            continue
-        }
-
-        println("s SATISFIABLE")
-        if (model.isEmpty())
-            println("c Done: any solution satisfies formula. ")
-        else {
-            println("v " + model.joinToString(" "))
-            println("c Done")
-        }
-    }
-}

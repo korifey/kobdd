@@ -53,4 +53,8 @@ class Opcache(val bits: Int = 20) {
         }
         return result[index]
     }
+
+    fun clear() {
+        storage.fill(0)
+    }
 }
