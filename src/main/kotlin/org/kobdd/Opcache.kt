@@ -14,7 +14,7 @@ enum class BinopKind {
 }
 
 class Opcache(val bits: Int = 20) {
-    private val bitsForHeader = 32 - 2 * MAX_CAPACITY_BITS
+    private val bitsForHeader = 64 - 2 * MAX_CAPACITY_BITS - 1/*don't need it but for sake of positive values*/
     private val maskForUnaryOp: Int
     init {
         require(bits >= 0) {"`bits` must be >= 0"}
@@ -55,8 +55,8 @@ class Opcache(val bits: Int = 20) {
         assert(low >= 0 && low < Kobdd.MAX_CAPACITY)
 
         // compressed = |4 bits: binop| MAX_CAPACITY_BITS: node1| MAX_CAPACITY_BITS:node2
-        val compressed = low.toLong() + (high.toLong() shl MAX_CAPACITY_BITS) + (header shl 2 * MAX_CAPACITY_BITS)
-        assert(compressed > 0) {"Can't distinguish from 0 placeholder in storage array"}
+        val compressed = (header.toLong() shl (2 * MAX_CAPACITY_BITS)) or (high.toLong() shl MAX_CAPACITY_BITS) or low.toLong()
+        assert(compressed != 0L) { "Can't distinguish from 0 placeholder in storage array" }
 
         val index = index(compressed)
 
@@ -92,7 +92,8 @@ class Opcache(val bits: Int = 20) {
     }
 
     fun clear() {
-        nextIdForUnaryOp = 0
+        nextIdForUnaryOp = 1
         storage.fill(0)
+        result.fill(0)
     }
 }

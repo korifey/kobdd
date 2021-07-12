@@ -45,18 +45,18 @@ fun solveCnf(vars: Int, clauses: Clauses, strategy: (vars: Int, initial: List<Ax
     val root = strategy(vars, nodes)
     if (!root.bdd.isSat()) return null //no solution
 
-    val model = IntArray(vars+1)
-    root.refineInterpretation(model)
+    val interpretation = IntArray(vars+1)
+    root.refineInterpretation(interpretation)
 
-    val res = model.toInterpretation()
+    val res = interpretation.toModel()
 
     //TODO remove it: here we just check that we are correct
-    require(checkSolutionCnf(res, clauses))
+    require(checkSolutionCnf(interpretation, clauses))
 
     return res
 }
 
-private fun IntArray.toInterpretation(): List<Int> {
+fun IntArray.toModel(): List<Int> {
     val res = mutableListOf<Int>()
     for (v in this.indices) {
         if (this[v] > 0) res.add(v)
@@ -66,15 +66,18 @@ private fun IntArray.toInterpretation(): List<Int> {
     return res
 }
 
-private fun checkSolutionCnf(interpretation: List<Int>, clauses: Array<out List<Int>>) : Boolean {
-    //we hope that model is sorted by abs values
-    val setOtTrue = BooleanArray((interpretation.maxOrNull()?:0)+1)
-    interpretation.forEach {if (it>0) setOtTrue[it] = true }
+fun List<Int>.toInterpretation(vars: Int) : IntArray {
+    val res = IntArray(vars+1)
+    forEach { if (it>0) res[it] = 1 else res[-it] = -1 }
+    return res
+}
 
+
+fun checkSolutionCnf(interpretation: IntArray, clauses: Array<out List<Int>>) : Boolean {
     outer@for (clause in clauses) {
         for (v in clause) {
-            if (v > 0 && setOtTrue.size > v && setOtTrue[v]) continue@outer
-            if (v < 0 && (setOtTrue.size <= -v || !setOtTrue[-v])) continue@outer
+            if (v > 0 && interpretation[v] > 0) continue@outer
+            if (v < 0 && interpretation[-v] < 0) continue@outer
         }
         //disjunction is false
         return false

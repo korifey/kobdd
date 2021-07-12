@@ -20,6 +20,10 @@ class Kobdd private constructor(val node: Int) {
     override fun toString(): String = if (node == ONE_NODE) "KOBDD(TRUE)" else if (node == ZERO_NODE) "KOBDD(FALSE)" else  "KOBDD(node=$node, var=${variable(node)})"
 
     companion object {
+
+        const val MAX_CAPACITY_BITS = 28
+        const val MAX_CAPACITY = 1 shl MAX_CAPACITY_BITS
+
         /**
          * Fast hashtable implementation without reference types. [TERM_MARKER] is like <null> for classic linked lists.
          */
@@ -29,7 +33,7 @@ class Kobdd private constructor(val node: Int) {
          * Length of [buckets] array and number of nodes in [storage] array. Each node is 4 ints, so [storage].size = [capacity]*4
          * Use only powers of 2 for capacity because ([capacity]-1) gives us handful bitmap for hashcode() to bucketNumber mapping
          */
-        private var capacity = 1 shl 10 //will use only powers of 2 as size
+        private var capacity = 1 shl 20 //will use only powers of 2 as size
 
         /**
          * Number of nodes in storage. Invariant: [size] <= [capacity]
@@ -52,8 +56,7 @@ class Kobdd private constructor(val node: Int) {
         internal fun zero(index: Int) : Int = storage[(index shl 2) + 2]
         private fun insertNode(variable: Int, one: Int, zero: Int): Int {
             val index = size ++
-//            if (index % 1_000_000 == 0)
-//                println("Nodes created: $index")
+//            if (index % 1_000_000 == 0) println(">Nodes created: $index")
             storage[index shl 2] = variable
             storage[(index shl 2)+1] = one
             storage[(index shl 2)+2] = zero
@@ -77,16 +80,14 @@ class Kobdd private constructor(val node: Int) {
             return variable * 31 * 31 + one * 31 + zero
         }
 
-        const val MAX_CAPACITY_BITS = 26
-        const val MAX_CAPACITY = 1 shl MAX_CAPACITY_BITS
-
         private fun ensureCapacity() {
             assert(size <= capacity)
             if (size < capacity) return
 
             //TODO Need to implement Garbage collection based on WeakReferences and [ref] at this codepoint
-            require(capacity < MAX_CAPACITY) {"Maximum capacity $MAX_CAPACITY is reached, can't use more memory"}
+            require(capacity < MAX_CAPACITY) { "Maximum capacity $MAX_CAPACITY is reached, can't use more memory" }
             capacity = capacity shl 1
+//            println("New capacity: %,d".format(capacity))
             val bitmask = capacity - 1
 
             buckets = IntArray(capacity) { TERM_MARKER }
@@ -157,7 +158,7 @@ class Kobdd private constructor(val node: Int) {
     }
 
     init {
-        refs.add(WeakReference(this))
+//TODO        refs.add(WeakReference(this))
     }
 
 }
@@ -339,6 +340,7 @@ fun Kobdd.or(other: Kobdd) : Kobdd = Kobdd(mkOr(this.node, other.node))
 
 fun Kobdd.exists(variable: Int) : Kobdd {
     val existsOpcache = opcache.createCacheForUnaryOp()
+//    val existsOpcache = hashMapOf<Int, Int>()
 
     fun mkExists(node: Int, variable: Int) : Int {
         if (node == ONE_NODE || node == ZERO_NODE) return node

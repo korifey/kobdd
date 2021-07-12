@@ -1,21 +1,25 @@
 package org.kobdd
 
 import org.junit.jupiter.api.Assertions.assertEquals
-import org.junit.jupiter.api.Test
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.MethodSource
 import kotlin.system.measureNanoTime
 
 class TestPhp {
 
-    @Test
-    fun testPhp() {
-        for (holes in 1..100) {
-            Kobdd.reset()
-            val time = measureNanoTime {
-                php(holes)
-            }
-            println("Solved in "+"%.3f".format(time / 1000_000_000.0)+" sec")
-            println("BDD nodes: ${Kobdd.size}")
+    companion object {
+        @JvmStatic
+        fun range() = (1..90).toList().toTypedArray()
+    }
+    @MethodSource("range")
+    @ParameterizedTest
+    fun testPhp(holes: Int) {
+        Kobdd.reset()
+        val time = measureNanoTime {
+            php(holes)
         }
+        println("Solved in "+"%.3f".format(time / 1000_000_000.0)+" sec")
+        println("BDD nodes: %,d".format(Kobdd.size))
     }
 
     private fun php(holes: Int) {
