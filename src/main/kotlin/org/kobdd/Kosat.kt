@@ -1,6 +1,7 @@
 package org.kobdd
 
 import java.io.BufferedReader
+import java.io.InputStream
 import java.io.InputStreamReader
 import java.util.*
 import kotlin.system.measureNanoTime
@@ -8,11 +9,13 @@ import kotlin.system.measureNanoTime
 typealias Clauses = Array<out List<Int>>
 
 sealed class ProofNode(val bdd: Kobdd, private val children: List<ProofNode>, val hasProjection: Boolean) {
-    open fun populateModel(model: IntArray) {
-        bdd.populateModel(model)
+    open fun refineInterpretation(partialInterpretation: IntArray) {
+        val substituted = bdd.substituteInterpretation(partialInterpretation)
+        substituted.refineInterpretation(partialInterpretation)
+
         for (child in children) {
             if (child.hasProjection)
-                child.populateModel(model)
+                child.refineInterpretation(partialInterpretation)
         }
     }
 }
@@ -27,6 +30,12 @@ class Join(val left: ProofNode, val right:ProofNode) : ProofNode(left.bdd * righ
     override fun toString(): String = if (left != Empty) "$left & $right" else right.toString()
 }
 class Projection(val variable: Int, val node: ProofNode) : ProofNode(node.bdd.exists(variable), listOf(node), true) {
+    override fun refineInterpretation(partialInterpretation: IntArray) {
+        println(this)
+        println(partialInterpretation.toInterpretation().joinToString())
+        node.refineInterpretation(partialInterpretation)
+    }
+
     override fun toString() = "∃$variable($node)"
 }
 
@@ -39,18 +48,23 @@ fun solveCnf(vars: Int, clauses: Clauses, strategy: (vars: Int, initial: List<Ax
     if (!root.bdd.isSat()) return null //no solution
 
     val model = IntArray(vars+1)
-    root.populateModel(model)
+    root.refineInterpretation(model)
 
-    val res = mutableListOf<Int>()
-    for (v in model.indices) {
-        if (model[v] > 0) res.add(v)
-        if (model[v] < 0) res.add(-v)
-        //zero mean variable doesn't influence on sat
-    }
+    val res = model.toInterpretation()
 
     //TODO remove it: here we just check that we are correct
-    checkSolutionCnf(res, clauses)
+    require(checkSolutionCnf(res, clauses))
 
+    return res
+}
+
+private fun IntArray.toInterpretation(): List<Int> {
+    val res = mutableListOf<Int>()
+    for (v in this.indices) {
+        if (this[v] > 0) res.add(v)
+        if (this[v] < 0) res.add(-v)
+        //zero mean variable doesn't influence on sat
+    }
     return res
 }
 
@@ -70,22 +84,41 @@ private fun checkSolutionCnf(interpretation: List<Int>, clauses: Array<out List<
     return true
 }
 
+/**
+ * Create [Join] of [nodes] sequentially left-to-right.
+ */
 fun join(nodes: List<ProofNode>) = nodes.fold(Empty as ProofNode) { acc, node-> Join(acc, node)}
+
+/**
+ * Strategy for [solveCnf] that [join]s every clause with conjunction sequentially without using [Projection]
+ */
 fun allJoinStrategy(vars: Int, nodes: List<Axiom>) = join(nodes)
-fun allProjection(vars: Int, nodes: List<Axiom>) : ProofNode {
+
+/**
+ * Strategy for [solveCnf] that for each variable `v` from [vars]:
+ * - [join]s root [ProofNode] `f` with every clause that contains `v`
+ * - Do [Projection] of root [ProofNode] `f` with `v`, i.e. ∃v.f
+ */
+fun allProjectionStrategy(vars: Int, nodes: List<Axiom>) : ProofNode {
     val unused = nodes.toMutableSet()
     return (1..vars).fold(Empty as ProofNode) { acc, v ->
         val toJoin = unused.filter { it.clause.contains(v) || it.clause.contains(-v) }
-        unused.removeAll(toJoin)
-        Projection(v, Join(acc, join(toJoin)))
+        if (!toJoin.isEmpty()) {
+            unused.removeAll(toJoin)
+            Projection(v, Join(acc, join(toJoin)))
+        } else
+            acc
+
     }
 }
 
-fun main() {
-    println("v KOBDD SAT SOLVER, v0.1")
-    println("v Solves formulas in CNF form as specified in http://www.satcompetition.org/2004/format-solvers2004.html")
+data class CnfRequest(val vars: Int, val clauses: Array<out List<Int>>)
 
-    val reader = BufferedReader(InputStreamReader(System.`in`))
+/**
+ * Reads [CnfRequest]'s assuming [stream] is formatted according [Simplified DIMACS](http://www.satcompetition.org/2004/format-solvers2004.html)
+ */
+fun readCnfRequests(stream: InputStream) = sequence {
+    val reader = BufferedReader(InputStreamReader(stream))
     val scanner = Scanner(reader)
 
     while (scanner.hasNext()) {
@@ -95,6 +128,10 @@ fun main() {
             scanner.nextLine()
             continue
         } //skip comment
+
+        if (token == "%") {
+            break
+        }
 
         if (token != "p")
             error ("Illegal token $token. Only 'c' and 'p' command are supported")
@@ -114,12 +151,17 @@ fun main() {
             }
         }
 
+        yield(CnfRequest(vars, clauses))
+    }
+}
+
+fun processCnfRequests(requests: Sequence<CnfRequest>) {
+    for ((vars, clauses) in requests) {
         val model: List<Int>?
         println("v Start processing CNF request with $vars variables and ${clauses.size} clauses")
-        val time = measureNanoTime {
+        measureNanoTime {
             model = solveCnf(vars, clauses, ::allJoinStrategy)
-        }
-        println("v Request processed in %.3f sec".format(time / 1_000_000_000.0))
+        }.let { time -> println("v Request processed in %.3f sec".format(time / 1_000_000_000.0)) }
 
         if (model == null) {
             println("s UNSATISFIABLE")
@@ -128,10 +170,18 @@ fun main() {
 
         println("s SATISFIABLE")
         if (model.isEmpty())
-            println("c Done: any solution satisfies formula. ")
+            println("c Done: formula is tautology. Any solution satisfies it.")
         else {
             println("v " + model.joinToString(" "))
             println("c Done")
         }
     }
+}
+
+fun main() {
+    println("v KOBDD SAT SOLVER, v0.1")
+    println("v Solves formulas in CNF form. Input must as formatted according simplified DIMACS specified in http://www.satcompetition.org/2004/format-solvers2004.html")
+
+
+    processCnfRequests(readCnfRequests(System.`in`))
 }

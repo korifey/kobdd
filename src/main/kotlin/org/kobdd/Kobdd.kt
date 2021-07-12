@@ -9,12 +9,8 @@ import org.kobdd.Kobdd.Companion.one
 import org.kobdd.Kobdd.Companion.opcache
 import org.kobdd.Kobdd.Companion.variable
 import org.kobdd.Kobdd.Companion.zero
-import java.io.BufferedReader
-import java.io.InputStreamReader
 import java.lang.ref.WeakReference
-import java.util.*
 import kotlin.math.absoluteValue
-import kotlin.system.measureNanoTime
 
 class Kobdd private constructor(val node: Int) {
 
@@ -186,6 +182,12 @@ enum class ClauseKind(val emptyClauseNode: Int, val literalWithItsNegation: Kobd
     Disjunction(ZERO_NODE, TRUE);
 }
 
+/**
+ * Creates clause (e.g. disjunction, conjunction depending on [ClauseKind]) from [literals].
+ * Order of literals is no matter.
+ *
+ * Example: `clause(Disjunction, [-3, 1, 2])` is BDD representing formula `x₁ ∨ x₂ ∨ ¬x₃`
+ */
 fun clause(clauseKind: ClauseKind, literals: List<Int>) : Kobdd {
     val sortedLiterals = literals.sortedByDescending { it.absoluteValue }
 
@@ -220,22 +222,52 @@ fun clause(clauseKind: ClauseKind, literals: List<Int>) : Kobdd {
 }
 
 
-fun mkSubst(node: Int, literal: Int) : Int {
-    val v = literal.absoluteValue
-    return when {
-        v < variable(node) -> node
-        v == variable(node) -> if (literal > 0) one(node) else zero(node)
-        else /* v > variable(node) */ -> mkNode(variable(node), mkSubst(one(node), literal), mkSubst(zero(node), literal))
-    }
-}
-/**
- * Substitution of variable's value info formula represented by BDD. F[abs([literal])=sign([literal])]
- */
-fun Kobdd.substitute(literal: Int): Kobdd {
-    require(literal != 0) {"0 is not allowed for literal"}
-    require(literal != Int.MIN_VALUE) {"Int.MIN_VALUE is not allowed for literal"}
 
-    return Kobdd(mkSubst(node, literal))
+/**
+ * Substitution of variable's value info formula represented by BDD. F[abs([variableWithValue])=sign([variableWithValue])]
+ */
+fun Kobdd.substitute(variableWithValue: Int): Kobdd {
+    require(variableWithValue != 0) {"0 is not allowed for literal"}
+    require(variableWithValue != Int.MIN_VALUE) {"Int.MIN_VALUE is not allowed for literal"}
+
+    fun mkSubst(node: Int, literal: Int) : Int {
+        val v = literal.absoluteValue
+        return when {
+            v < variable(node) -> node
+            v == variable(node) -> if (literal > 0) one(node) else zero(node)
+            else /* v > variable(node) */ -> mkNode(variable(node), mkSubst(one(node), literal), mkSubst(zero(node), literal))
+        }
+    }
+
+    return Kobdd(mkSubst(node, variableWithValue))
+}
+
+
+fun Kobdd.substituteInterpretation(partialInterpretation: IntArray): Kobdd {
+
+    val cache = mutableMapOf<Int, Int>()
+
+    fun mkSubstituteInterpretation(node: Int) : Int{
+        if (node < 0) //TERMINAL
+            return node
+
+        val v = variable(node)
+        return cache.getOrPut(node) {
+            when {
+                //doesn't substitute anything for this node, because we don't know abything about it
+                partialInterpretation[v] == 0 -> mkNode(v, mkSubstituteInterpretation(one(node)), mkSubstituteInterpretation(zero(node)))
+
+                partialInterpretation[v] > 0 -> {
+                    mkSubstituteInterpretation(one(node))
+                }
+                else -> {
+                    mkSubstituteInterpretation(zero(node))
+                }
+            }
+
+        }
+    }
+    return Kobdd(mkSubstituteInterpretation(node))
 }
 
 /**
@@ -346,27 +378,24 @@ fun Kobdd.model() : List<Int>? {
     return res
 }
 
-internal fun Kobdd.populateModel(model: IntArray) {
+internal fun Kobdd.refineInterpretation(partialInterpretation: IntArray) {
     var curNode = node
     while (curNode != ONE_NODE) {
         assert (curNode != ZERO_NODE)
 
-        val m = model[variable(curNode)]
-        if (m > 0) {
-            assert(m == 1)
-            curNode = one(curNode)
-        } else if (m < 0) {
-            assert(m == -1)
-            curNode = zero(curNode)
-        } else /* v == 0 */ {
-            if (one(curNode) != ZERO_NODE) {
-                model[variable(curNode)] = 1
-                curNode = one(curNode)
-            } else {
-                model[variable(curNode)] = -1
-                curNode = zero(curNode)
-            }
+        //we mustn't invoke this method for bdd containing variables that already assigned in interpretation
+        assert(partialInterpretation[variable(curNode)] == 0) {
+            "Method mustn't be called for bdd with variables that already assigned. Variable=${variable(curNode)}"
         }
+
+        if (one(curNode) != ZERO_NODE) {
+            partialInterpretation[variable(curNode)] = 1
+            curNode = one(curNode)
+        } else {
+            partialInterpretation[variable(curNode)] = -1
+            curNode = zero(curNode)
+        }
+
     }
 }
 

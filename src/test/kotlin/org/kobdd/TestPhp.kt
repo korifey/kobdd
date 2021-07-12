@@ -13,7 +13,7 @@ class TestPhp {
             val time = measureNanoTime {
                 php(holes)
             }
-            println("Solved in "+"%.2f".format(time / 1000_000_000.0)+" sec")
+            println("Solved in "+"%.3f".format(time / 1000_000_000.0)+" sec")
             println("BDD nodes: ${Kobdd.size}")
         }
     }
