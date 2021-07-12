@@ -31,8 +31,6 @@ class Join(val left: ProofNode, val right:ProofNode) : ProofNode(left.bdd * righ
 }
 class Projection(val variable: Int, val node: ProofNode) : ProofNode(node.bdd.exists(variable), listOf(node), true) {
     override fun refineInterpretation(partialInterpretation: IntArray) {
-        println(this)
-        println(partialInterpretation.toInterpretation().joinToString())
         node.refineInterpretation(partialInterpretation)
     }
 
@@ -160,7 +158,7 @@ fun processCnfRequests(requests: Sequence<CnfRequest>) {
         val model: List<Int>?
         println("v Start processing CNF request with $vars variables and ${clauses.size} clauses")
         measureNanoTime {
-            model = solveCnf(vars, clauses, ::allJoinStrategy)
+            model = solveCnf(vars, clauses, ::allProjectionStrategy)
         }.let { time -> println("v Request processed in %.3f sec".format(time / 1_000_000_000.0)) }
 
         if (model == null) {

@@ -245,7 +245,7 @@ fun Kobdd.substitute(variableWithValue: Int): Kobdd {
 
 fun Kobdd.substituteInterpretation(partialInterpretation: IntArray): Kobdd {
 
-    val cache = mutableMapOf<Int, Int>()
+    val cache = opcache.createCacheForUnaryOp()
 
     fun mkSubstituteInterpretation(node: Int) : Int{
         if (node < 0) //TERMINAL
@@ -280,21 +280,22 @@ fun conj(vararg literals: Int) = clause(ClauseKind.Conjunction, literals.toList(
  */
 fun disj(vararg literals: Int) = clause(ClauseKind.Disjunction, literals.toList())
 
-private fun mkNegate(node: Int) : Int {
-    if (node == ONE_NODE) return ZERO_NODE
-    if (node == ZERO_NODE) return ONE_NODE
 
-
-    return mkNode(variable(node), mkNegate(one(node)), mkNegate(zero(node)))
-}
-
+private val negateOpcache = opcache.createCacheForUnaryOp()
 /**
  * Negates formula represented by [this] BDD.
  */
-fun Kobdd.negate() : Kobdd = Kobdd(mkNegate(node))
+fun Kobdd.negate() : Kobdd {
+    fun mkNegate(node: Int) : Int {
+        if (node == ONE_NODE) return ZERO_NODE
+        if (node == ZERO_NODE) return ONE_NODE
 
-//TODO use cache instead hashtable
-//val andCache = hashMapOf<Pair<Int, Int>, Int>()
+
+        return negateOpcache.getOrPut(node) { mkNode(variable(node), mkNegate(one(node)), mkNegate(zero(node))) }
+    }
+    return Kobdd(mkNegate(node))
+}
+
 private fun mkAnd(left: Int, right: Int) : Int {
     if (left == right) return left
     if (left == ZERO_NODE || right == ZERO_NODE) return ZERO_NODE
@@ -310,8 +311,6 @@ private fun mkAnd(left: Int, right: Int) : Int {
     }
 }
 
-//TODO use cache instead hashtable
-//val orCache = hashMapOf<Pair<Int, Int>, Int>()
 private fun mkOr(left: Int, right: Int) : Int {
     if (left == right) return left
     if (left == ONE_NODE || right == ONE_NODE) return ONE_NODE
@@ -338,20 +337,22 @@ fun Kobdd.and(other: Kobdd) : Kobdd = Kobdd(mkAnd(this.node, other.node))
 fun Kobdd.or(other: Kobdd) : Kobdd = Kobdd(mkOr(this.node, other.node))
 
 
-val existsCache = hashMapOf<Int, Int>()
-fun mkExists(node: Int, variable: Int) : Int {
-    if (node == ONE_NODE || node == ZERO_NODE) return node
-    return existsCache.getOrPut(node, { when {
-        variable < variable(node) -> node
-        variable > variable(node) -> mkNode(variable(node), mkExists(one(node), variable), mkExists(zero(node), variable))
-        else -> mkOr(one(node), zero(node))
-    }})
-}
-
 fun Kobdd.exists(variable: Int) : Kobdd {
-    require(variable > 0) { "Variable must be greater that 0, but it's $variable" }
+    val existsOpcache = opcache.createCacheForUnaryOp()
 
-    existsCache.clear()
+    fun mkExists(node: Int, variable: Int) : Int {
+        if (node == ONE_NODE || node == ZERO_NODE) return node
+
+        return existsOpcache.getOrPut(node) {
+            when {
+                variable < variable(node) -> node
+                variable > variable(node) -> mkNode(variable(node), mkExists(one(node), variable), mkExists(zero(node), variable))
+                else -> mkOr(one(node), zero(node))
+            }
+        }
+    }
+
+    require(variable > 0) { "Variable must be greater that 0, but it's $variable" }
     return Kobdd(mkExists(node, variable))
 }
 
