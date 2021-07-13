@@ -36,19 +36,19 @@ c Done
 ### Pigeonhole principle (PHP)
 One of the goals for SAT-solver based on BDD is to show that it can solve [PHP](https://en.wikipedia.org/wiki/Pigeonhole_principle) problem
 unsolvable by [CDCL](https://en.wikipedia.org/wiki/Conflict-driven_clause_learning) based SAT solver. 
-Any CDCL solver works almost infinitely long for *PHP(31,30)* because it has to generate exponential
+Any CDCL solver works almost infinitely long for *PHP(21,20)* because it has to generate exponential
 size proof to validate that solution is UNSAT ([The intractability of resolution, Armin Haken, Theoretical Computer Science
 Volume 39, 1985, Pages 297-308](https://www.sciencedirect.com/science/article/pii/0304397585901446)).
 
 For BDD-based solver it was shown that polynomial proof exists in 
 [A. Atserias, P.G. Kolaitis, M.Y. Vardi, Constraint propagation as a proof system, in: CP, 2004, pp. 77–91](https://link.springer.com/chapter/10.1007/978-3-540-30201-8_9).
-Later direct algorithm that with proven polynomial complexity was proposed in
+Later direct algorithm with proven polynomial complexity was proposed in
 [A direct construction of polynomial-size OBDD proof of pigeon hole problem, Wěi Chén, Wenhui Zhang, Information Processing Letters
 Volume 109, Issue 10, 30 April 2009, Pages 472-477](https://www.sciencedirect.com/science/article/pii/S0020019009000143)
 
-In current repository algorithm is implemented using KOBDD solver and can be verified by running tests in 
+In this repository the algorithm is implemented using KOBDD solver and can be verified by running tests in 
 [TestPhp](https://github.com/korifey/kobdd/blob/main/src/test/kotlin/org/kobdd/TestPhp.kt)
-class. Following experimental results for *PHP(n+1,n)* were obtained:
+class. Following experimental results for *PHP(n+1,n)* were obtained on *Intel Core i7-8550U, 1.8GHz 16GB RAM*:
 
 Problem | #clauses | #nodes | time
 --- | --- | --- | ---
@@ -126,3 +126,6 @@ PHP(72, 71) | 181,548 | 93,239,970 | 14.679 sec
 PHP(73, 72) | 189,289 | 99,708,145 | 16.379 sec
 PHP(74, 73) | 197,247 | 106,530,215 | 18.243 sec
 PHP(75, 74) | 205,425 | 113,720,500 | 19.681 sec
+
+For comparison quite efficient [Minisat](http://minisat.se/MiniSat.html) CDCL-based solver works 3.5 sec for *PHP(10,9)*, 
+197 sec for *PHP(11,10)* and **too long to wait** for *PHP(12,11)* on the same machine.
