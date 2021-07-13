@@ -50,7 +50,7 @@ test {
 
 jar {
     manifest {
-        attributes "Main-Class": "org.kobdd.KobddKt"
+        attributes "Main-Class": "org.kobdd.KosatKt"
         attributes "Created-By": "https://github.com/korifey/kobdd"
         version '0.1'
     }

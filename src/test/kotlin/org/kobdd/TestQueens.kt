@@ -6,6 +6,8 @@ import kotlin.system.measureNanoTime
 
 class TestQueens {
 
+
+
     companion object {
         @JvmStatic
         fun range() = (1..10).toList().toTypedArray()
