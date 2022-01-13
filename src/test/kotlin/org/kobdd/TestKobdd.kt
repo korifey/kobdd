@@ -1,6 +1,7 @@
 package org.kobdd
 
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Test
 
 
@@ -23,10 +24,19 @@ class TestKobdd {
         )
     }
 
-//    @Test
-//    fun testOperatopn() {
-//
-//        val x = clause(ClauseKind.Disjunction, listOf(2, 1, -3, -3))
-//        val y = x.neg()
-//    }
+    @Test
+    fun testPrintClause() {
+        val cnf = arrayOf(
+            listOf(1, 2, -3),
+            listOf(-1, -2, 3),
+            listOf(-1, -3),
+            listOf(-2, -3)
+        )
+
+        println("Test output can be viewed in terminal, not in IDE")
+        println("Solving CNF: ${printCnfUnicode(cnf)}")
+        val solution = solveCnf(3, cnf, ::allJoinStrategy)
+        assertNotNull(solution)
+        println("Solution: ${printClauseUnicode(ClauseKind.Conjunction, solution!!)}")
+    }
 }

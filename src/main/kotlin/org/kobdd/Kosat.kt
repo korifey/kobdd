@@ -1,14 +1,18 @@
 package org.kobdd
 
+import org.kobdd.util.PersistentBoolset
 import java.io.BufferedReader
 import java.io.InputStream
 import java.io.InputStreamReader
 import java.util.*
+import kotlin.math.log2
 import kotlin.system.measureNanoTime
 
 typealias Clauses = Array<out List<Int>>
 
-sealed class ProofNode(val bdd: Kobdd, private val children: List<ProofNode>, val hasProjection: Boolean) {
+sealed class ProofNode(val bdd: Kobdd, private val children: List<ProofNode>, val hasProjection: Boolean, val vars: PersistentBoolset) {
+    val nodeCount = bdd.nodeCount()
+
     open fun refineInterpretation(partialInterpretation: IntArray) {
         val substituted = bdd.substituteInterpretation(partialInterpretation)
         substituted.refineInterpretation(partialInterpretation)
@@ -20,16 +24,19 @@ sealed class ProofNode(val bdd: Kobdd, private val children: List<ProofNode>, va
     }
 }
 
-object Empty : ProofNode(Kobdd.TRUE, listOf(), false) {
+object Empty : ProofNode(Kobdd.TRUE, listOf(), false, PersistentBoolset()) {
     override fun toString() = "T"
 }
-class Axiom(val clause: List<Int>) : ProofNode(clause(ClauseKind.Disjunction, clause), listOf(), false) {
+
+class Axiom(val clause: List<Int>) : ProofNode(clause(ClauseKind.Disjunction, clause), listOf(), false, PersistentBoolset(clause)) {
     override fun toString(): String = clause.joinToString ("|")
 }
-class Join(val left: ProofNode, val right:ProofNode) : ProofNode(left.bdd * right.bdd, listOf(left, right), left.hasProjection or right.hasProjection) {
+class Join(val left: ProofNode, val right:ProofNode) :
+        ProofNode(left.bdd * right.bdd, listOf(left, right), left.hasProjection or right.hasProjection, left.vars + right.vars) {
+
     override fun toString(): String = if (left != Empty) "$left & $right" else right.toString()
 }
-class Projection(val variable: Int, val node: ProofNode) : ProofNode(node.bdd.exists(variable), listOf(node), true) {
+class Projection(val variable: Int, val node: ProofNode) : ProofNode(node.bdd.exists(variable), listOf(node), true, node.vars - variable) {
     override fun refineInterpretation(partialInterpretation: IntArray) {
         node.refineInterpretation(partialInterpretation)
     }
@@ -103,6 +110,7 @@ fun allJoinStrategy(vars: Int, nodes: List<Axiom>) = join(nodes)
 fun allProjectionStrategy(vars: Int, nodes: List<Axiom>) : ProofNode {
     val unused = nodes.toMutableSet()
     return (1..vars).fold(Empty as ProofNode) { acc, v ->
+//        println("Var: $v")
         val toJoin = unused.filter { it.clause.contains(v) || it.clause.contains(-v) }
         if (!toJoin.isEmpty()) {
             unused.removeAll(toJoin)
@@ -111,6 +119,40 @@ fun allProjectionStrategy(vars: Int, nodes: List<Axiom>) : ProofNode {
             acc
 
     }
+}
+
+
+fun allProjectionSortedByUnusedAsc(vars: Int, nodes: List<Axiom>) : ProofNode {
+    val proofNodes = nodes.toMutableSet<ProofNode>()
+
+    val vEstimate = (1..vars).associate { v -> v to proofNodes.sumOf { n ->
+        if (n.vars.contains(v))
+            log2(n.nodeCount.toDouble())
+        else 0.0
+    }
+    }.toMutableMap()
+
+    while (proofNodes.size > 1) {
+        val nextVar = vEstimate.minByOrNull { (_, estimate) -> estimate }!!.key
+
+        val toJoin = proofNodes.filter { it.vars.contains(nextVar) }
+        proofNodes.removeAll(toJoin)
+
+        for (n in toJoin) {
+            for (v in n.vars.toList()) {
+                vEstimate[v] = vEstimate.getValue(v) - log2(n.nodeCount.toDouble())
+            }
+        }
+
+        val newNode = Projection(nextVar, join(toJoin))
+        proofNodes.add(newNode)
+        for (v in newNode.vars.toList()) {
+            vEstimate[v] = vEstimate.getValue(v) + log2(newNode.nodeCount.toDouble())
+        }
+        vEstimate.remove(nextVar)
+    }
+
+    return proofNodes.single()
 }
 
 data class CnfRequest(val vars: Int, val clauses: Array<out List<Int>>)
@@ -160,8 +202,16 @@ fun processCnfRequests(requests: Sequence<CnfRequest>) {
     for ((vars, clauses) in requests) {
         val model: List<Int>?
         println("v Start processing CNF request with $vars variables and ${clauses.size} clauses")
+
+        val vStat = Array(vars+1) {v -> v to clauses.count { it.contains(v) || it.contains(-v) }}
+        vStat.sortBy { (v, cnt) -> cnt}
+        for ((v, cnt) in vStat) {
+            if (v == 0) continue
+            println("$v: $cnt")
+        }
+
         measureNanoTime {
-            model = solveCnf(vars, clauses, ::allProjectionStrategy)
+            model = solveCnf(vars, clauses, ::allProjectionSortedByUnusedAsc)
         }.let { time -> println("v Request processed in %.3f sec".format(time / 1_000_000_000.0)) }
 
         if (model == null) {
@@ -180,9 +230,8 @@ fun processCnfRequests(requests: Sequence<CnfRequest>) {
 }
 
 fun main() {
-    println("v KOBDD SAT SOLVER, v0.1")
+    println("v KOBDD SAT SOLVER, v1.0")
     println("v Solves formulas in CNF form. Input must as formatted according simplified DIMACS specified in http://www.satcompetition.org/2004/format-solvers2004.html")
-
 
     processCnfRequests(readCnfRequests(System.`in`))
 }

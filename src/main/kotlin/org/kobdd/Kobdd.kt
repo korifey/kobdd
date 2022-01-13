@@ -56,6 +56,7 @@ class Kobdd private constructor(val node: Int) {
         internal fun zero(index: Int) : Int = storage[(index shl 2) + 2]
         private fun insertNode(variable: Int, one: Int, zero: Int): Int {
             val index = size ++
+//            uncomment
 //            if (index % 1_000_000 == 0) println(">Nodes created: $index")
             storage[index shl 2] = variable
             storage[(index shl 2)+1] = one
@@ -178,9 +179,9 @@ fun clause(literal: Int) : Kobdd {
     )
 }
 
-enum class ClauseKind(val emptyClauseNode: Int, val literalWithItsNegation: Kobdd) {
-    Conjunction(ONE_NODE, FALSE),
-    Disjunction(ZERO_NODE, TRUE);
+enum class ClauseKind(val emptyClauseNode: Int, val literalWithItsNegation: Kobdd, val joinString: String) {
+    Conjunction(ONE_NODE, FALSE, "\u2227"),
+    Disjunction(ZERO_NODE, TRUE, "\u2228");
 }
 
 /**
@@ -283,6 +284,7 @@ fun disj(vararg literals: Int) = clause(ClauseKind.Disjunction, literals.toList(
 
 
 private val negateOpcache = opcache.createCacheForUnaryOp()
+
 /**
  * Negates formula represented by [this] BDD.
  */
@@ -296,6 +298,21 @@ fun Kobdd.negate() : Kobdd {
     }
     return Kobdd(mkNegate(node))
 }
+
+private val nodecountOpcache = opcache.createCacheForUnaryOp()
+/**
+ * Count number of nodes for [this] BDD.
+ */
+fun Kobdd.nodeCount() : Int {
+    val visited = mutableSetOf<Int>()
+    fun mkNodeCount(node: Int) : Int {
+        if (!visited.add(node)) return 0
+        return if (node == ONE_NODE || node == ZERO_NODE) 1
+            else 1 + mkNodeCount(one(node)) + mkNodeCount(zero(node))
+    }
+    return mkNodeCount(node)
+}
+
 
 private fun mkAnd(left: Int, right: Int) : Int {
     if (left == right) return left

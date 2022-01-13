@@ -75,7 +75,7 @@ class TestPhp {
 //      val res = solveCnf(holes * pingeons, clauses, ::allJoinStrategy)
 
 //      Uncomment this to ty solve PHP with "Project all strategy" - fails on [holes=13]
-//      val res = solveCnf(holes * pingeons, clauses, ::allProjectionStrategy)
+//      val res = solveCnf(holes * pigeons, clauses, ::allProjectionSortedByUnusedAsc)
 
         val res = solveCnf(holes * pigeons, clauses) { vars, nodes ->
             var acc = join(nodes.take(pigeons))
@@ -93,6 +93,8 @@ class TestPhp {
             assert(next == clauses.size)
             acc
         }
+
+
         assertNull(res)
         return clauses.size
     }
